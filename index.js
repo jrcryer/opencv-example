@@ -1,45 +1,32 @@
-console.log('Loading function');
 
-var aws = require('aws-sdk');
-var cv = require('opencv');
-var s3 = new aws.S3({ apiVersion: '2006-03-01' });
+console.log('Loading function...');
+
+var aws     = require('aws-sdk');
+var opencv  = require('opencv');
+var Promise = require('promise');
+var s3      = new aws.S3({ apiVersion: '2006-03-01' });
+var get     = require('./lib/image_loader')(s3).load;
+var read    = require('./lib/image_reader')(opencv).read;
+var detect  = require('./lib/face_detector')(opencv).detect;
 
 exports.handler = function(event, context) {
-    //console.log('Received event:', JSON.stringify(event, null, 2));
 
-    // Get the object from the event and show its content type
-    var bucket = event.Records[0].s3.bucket.name;
-    var key = event.Records[0].s3.object.key;
-    var params = {
-        Bucket: bucket,
-        Key: key
-    };
-    s3.getObject(params, function(err, data) {
-        if (err) {
-            console.log(err);
-            var message = "Error getting object " + key + " from bucket " + bucket +
-                ". Make sure they exist and your bucket is in the same region as this function.";
-            console.log(message);
-            context.fail(message);
-        } else {
-            console.log('File: ', key);
-            console.log('CONTENT TYPE: ', data.ContentType);
+  var onComplete = function(numOfFaces) {
+    console.log(numOfFaces + ' Face(s) Detected');
+    context.succeed(numOfFaces + ' Face(s) Detected');
+  };
 
-            cv.readImage(new Buffer(data.Body, 'binary'), function(err, im) {
-      				if (err) {
-                console.log(err);
-      					context.fail(err);
-      				} else {
-      					im.detectObject(cv.FACE_CASCADE, {}, function(err, faces) {
-                  if (err) {
-                    console.log(err);
-                    context.fail(err);
-                  }
-                  console.log(faces.length + ' Faces Detected');
-      			    	context.succeed(faces.length + ' Faces Detected');
-      	  			});
-      				}
-      			});
-        }
-    });
+  var onFailure = function(err) {
+    console.log(err);
+    context.fail(err);
+  };
+
+  var resource = {
+    Bucket: event.Records[0].s3.bucket.name,
+    Key: event.Records[0].s3.object.key
+  };
+
+  get(resource).then(read, onFailure)
+               .then(detect, onFailure)
+               .done(onComplete, onFailure);
 };
